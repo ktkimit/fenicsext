@@ -59,7 +59,7 @@ A = dl.assemble(a)
 L = dl.assemble(l)
 normbc.apply(A, L)
 
-# solve the linear system
+# Solve the linear system.
 # NOTE: The solution vector gets back to the original coordinates after solving the
 # linear system of equations.
 x = dl.Function(Vh)
