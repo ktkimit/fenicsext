@@ -22,7 +22,7 @@ class NormalDirichletBC(object):
         Vh:
             Function space.
         bcvalues:
-            Boundary values for ``coord_bc`` component.
+            Boundary values for `coord_bc` component.
         boundary_markers:
             Mesh function handling boundary mesh entities.
         mark: int
@@ -34,20 +34,22 @@ class NormalDirichletBC(object):
         """
         self.Vh = Vh
 
-        assert Vh.num_sub_spaces() > 1, "Function space should be 2D or 3D."
-        if Vh.num_sub_spaces() == 3:
+        self._set_vector_space(Vh)
+
+        assert self.Uh.num_sub_spaces() > 1, "Function space should be 2D or 3D."
+        if self.Uh.num_sub_spaces() == 3:
             raise NotImplementedError("3D case is not implemented yet.")
 
         self.bc_dofs = list()
         self.bc_values = list()
-        for i in range(Vh.num_sub_spaces()):
-            bc = dl.DirichletBC(Vh.sub(i), bcvalues, boundary_markers, mark)
+        for i in range(self.Uh.num_sub_spaces()):
+            bc = dl.DirichletBC(self.Uh.sub(i), bcvalues, boundary_markers, mark)
             self.bc_dofs.append(list(bc.get_boundary_values().keys()))
             self.bc_values.append(list(bc.get_boundary_values().values()))
 
         self._compute_dofs_nodes()
 
-        ds = dl.Measure("ds", domain=Vh.mesh(), subdomain_data=boundary_markers)
+        ds = dl.Measure("ds", domain=self.Vh.mesh(), subdomain_data=boundary_markers)
         self._compute_normal(ds(mark))
 
         self._construct_rotation()
@@ -138,9 +140,7 @@ class NormalDirichletBC(object):
             raise NotImplementedError("Format " + out_fmt + " is not supported.")
 
     def apply(self, *args):
-        """Apply the boundary conditions
-
-        """
+        """Apply the boundary conditions"""
         if len(args) == 1 and isinstance(args[0], dl.Vector):
             self.rotate_vector(args[0], apply_bc=True, out_fmt="dolfin")
         elif len(args) == 1 and isinstance(args[0], dl.Matrix):
@@ -174,6 +174,27 @@ class NormalDirichletBC(object):
         x.zero()
         x.axpy(1.0, dl.Vector(dl.PETScVector(y)))
 
+    def _set_vector_space(self, Vh):
+        """Set the function space for the `VectorElement` from `Vh`
+
+        Parameters
+        ----------
+        Vh: Input function space.
+        """
+        element = Vh.element().signature().split('(')[0]
+        if element == 'VectorElement':
+            self.Uh = Vh
+            self.uh_index = None
+            return
+        elif element == 'MixedElement':
+            for i in range(Vh.num_sub_spaces()):
+                if Vh.sub(i).element().signature().split('(')[0] == 'VectorElement':
+                    self.Uh = Vh.sub(i)
+                    self.uh_index = i
+                    return
+
+        raise NotImplementedError("Wrong function space input.")
+
     def _compute_dofs_nodes(self):
         """Compute coordinates and dofs of each node on the boundary.
 
@@ -183,7 +204,7 @@ class NormalDirichletBC(object):
         """
         # make 'self.bc_dofs' as set type
         bc_dofs = list()
-        for i in range(self.Vh.num_sub_spaces()):
+        for i in range(self.Uh.num_sub_spaces()):
             bc_dofs.append(set(self.bc_dofs[i]))
 
         # coordinates of the nodes living on the boundary
@@ -194,7 +215,7 @@ class NormalDirichletBC(object):
         # functions for this?
         tol = 1.0e-16
         ndofs = len(self.bc_dofs[0])
-        self.dofs_nodes = np.empty((ndofs, self.Vh.num_sub_spaces()), dtype=np.int32)
+        self.dofs_nodes = np.empty((ndofs, self.Uh.num_sub_spaces()), dtype=np.int32)
 
         tree = self.Vh.mesh().bounding_box_tree()
         for ix in range(ndofs):
@@ -202,9 +223,9 @@ class NormalDirichletBC(object):
             self.dofs_nodes[ix, 0] = dofx
             px = dl.Point(self.coords_nodes[ix, :])
 
-            for n in range(1, self.Vh.num_sub_spaces()):
+            for n in range(1, self.Uh.num_sub_spaces()):
                 cells = tree.compute_collisions(px)
-                dofmap = self.Vh.sub(n).dofmap()
+                dofmap = self.Uh.sub(n).dofmap()
 
                 for cell in cells:
                     dofs_cell = dofmap.cell_dofs(cell)
@@ -232,6 +253,10 @@ class NormalDirichletBC(object):
         n = dl.FacetNormal(self.Vh.mesh())
         u = dl.TrialFunction(self.Vh)
         v = dl.TestFunction(self.Vh)
+
+        if self.uh_index is not None:
+            u = dl.split(u)[self.uh_index]
+            v = dl.split(v)[self.uh_index]
 
         a = dl.inner(u, v) * ds
         b = dl.inner(n, v) * ds
@@ -277,3 +302,4 @@ class NormalDirichletBC(object):
             self.Rpetsc[dofy, dofy] = nx
 
         self.Rpetsc.assemble()
+

@@ -4,14 +4,10 @@ a unit body load. The purpose of this example is to show how to impose a
 no-penetration boundary condition using local (nodal) coordinate transform.
 """
 import os
-import sys
 
-sys.path.append(os.path.dirname(os.path.abspath("")))
-
-import numpy as np
 import dolfin as dl
-from petsc4py import PETSc
-
+ 
+# import add_path
 from fenicsext import NormalDirichletBC
 
 
@@ -66,4 +62,6 @@ x = dl.Function(Vh)
 dl.solve(A, x.vector(), L)
 normbc.get_original_vec(x.vector())
 
-dl.File("./results/utrue.pvd") << x
+
+figure_path = os.path.dirname(os.path.realpath(__file__)) + "/figures"
+dl.File(figure_path + "/u.pvd") << x
