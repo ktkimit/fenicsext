@@ -1,12 +1,7 @@
-"""
-This example considers a 2D elastic body in plan stress condition subjected to
-a unit body load. The purpose of this example is to show how to impose a
-no-penetration boundary condition using local (nodal) coordinate transform.
-"""
 import os
 
 import dolfin as dl
- 
+
 import fenicsext_path
 from fenicsext import NormalDirichletBC
 
@@ -16,13 +11,8 @@ class BottomBoundary(dl.SubDomain):
         return on_boundary and x[1] < dl.DOLFIN_EPS
 
 
-# Set material properties.
-E = dl.Constant(1e6)
-nu = dl.Constant(0.3)
-f = dl.Constant((0.0, 1.0e3))
-
 # Create a mesh.
-nsteps = 10
+nsteps = 1
 mesh = dl.UnitDiscMesh.create(dl.MPI.comm_world, nsteps, 2, 2)
 bottom = BottomBoundary()
 boundary_markers = dl.MeshFunction("size_t", mesh, mesh.geometry().dim() - 1)
@@ -31,37 +21,50 @@ bottom.mark(boundary_markers, 1)
 ds = dl.Measure("ds", domain=mesh, subdomain_data=boundary_markers)
 
 # Define the finite element function space.
-UV = dl.VectorElement("Lagrange", mesh.ufl_cell(), 1)
-Vh = dl.FunctionSpace(mesh, UV)
+P1 = dl.FiniteElement("Lagrange", mesh.ufl_cell(), 1)
+P2 = dl.VectorElement("Lagrange", mesh.ufl_cell(), 2)
+TH = P2 * P1
+Vh = dl.FunctionSpace(mesh, TH)
 
 # Define the no-penetration boundary condition.
 normbc = NormalDirichletBC(Vh, dl.Constant(0.0), boundary_markers, 1)
 
 # Define trial and test functions.
-u = dl.TrialFunction(Vh)
-v = dl.TestFunction(Vh)
+trial = dl.TrialFunction(Vh)
+test = dl.TestFunction(Vh)
 
 # Define the weak form.
-eps_u = dl.sym(dl.grad(u))
-eps_v = dl.sym(dl.grad(v))
-sigma_v = E / (1 + nu) * (eps_v + nu / (1 - nu) * dl.tr(eps_v) * dl.Identity(2))
-a = dl.inner(sigma_v, eps_u) * dl.dx
-l = dl.inner(f, v) * dl.dx
+load = dl.Constant((0.0, -1.0))
+
+normal = dl.FacetNormal(mesh)
+u, p = dl.split(trial)
+v, q = dl.split(test)
+
+tang_u = u - dl.outer(normal, normal) * u
+tang_v = v - dl.outer(normal, normal) * v
+
+a = (
+    dl.inner(dl.sym(dl.grad(u)), dl.sym(dl.grad(v))) * dl.dx
+    - dl.div(u) * q * dl.dx
+    - dl.div(v) * p * dl.dx
+    + dl.inner(tang_u, tang_v) * ds(1)
+)
+b = dl.inner(load, v) * dl.dx
 
 # Assemble the linear system.
 # NOTE: The system is rotated such that the nodal dofs on the boundary
 # correspond to the (locally) rotated coordinates.
 A = dl.assemble(a)
-L = dl.assemble(l)
-normbc.apply(A, L)
+B = dl.assemble(b)
+normbc.apply(A, B)
 
 # Solve the linear system.
 # NOTE: The solution vector gets back to the original coordinates after solving the
 # linear system of equations.
 x = dl.Function(Vh)
-dl.solve(A, x.vector(), L)
+dl.solve(A, x.vector(), B)
 normbc.get_original_vec(x.vector())
 
-
 figure_path = os.path.dirname(os.path.realpath(__file__)) + "/figures"
-dl.File(figure_path + "/u.pvd") << x
+dl.File(figure_path + "/u.pvd") << x.sub(0)
+dl.File(figure_path + "/p.pvd") << x.sub(0)
