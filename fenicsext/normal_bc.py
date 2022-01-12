@@ -263,7 +263,17 @@ class NormalDirichletBC(object):
         A = dl.assemble(a, keep_diagonal=True)
         B = dl.assemble(b)
 
-        A.ident_zeros()
+        Apetsc = dl.as_backend_type(A).mat()
+
+        temp = np.ones(self.Vh.dim(), dtype=np.int)
+        for i in range(self.Uh.num_sub_spaces()):
+            temp[self.bc_dofs[i]] = 0
+
+        idx = np.where(temp == 1)[0]
+        Apetsc.zeroRowsColumns(list(idx), diag=1)
+        A = dl.Matrix(dl.PETScMatrix(Apetsc))
+        B[idx] = 0
+
         self.normal = dl.Function(self.Vh)
         dl.solve(A, self.normal.vector(), B)
 
