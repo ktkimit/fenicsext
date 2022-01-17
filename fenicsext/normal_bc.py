@@ -13,6 +13,7 @@ class NormalDirichletBC(object):
         boundary_markers: dl.MeshFunction,
         mark: int,
         coord_bc: str = "normal",
+        ref_point=np.array([0, 0])
     ):
 
         """Constructor
@@ -49,8 +50,9 @@ class NormalDirichletBC(object):
 
         self._compute_dofs_nodes()
 
-        ds = dl.Measure("ds", domain=self.Vh.mesh(), subdomain_data=boundary_markers)
-        self._compute_normal(ds(mark))
+        # ds = dl.Measure("ds", domain=self.Vh.mesh(), subdomain_data=boundary_markers)
+        # self._compute_normal(ds(mark))
+        self._compute_normal(boundary_markers, mark, ref_point)
 
         self._construct_rotation()
 
@@ -181,14 +183,14 @@ class NormalDirichletBC(object):
         ----------
         Vh: Input function space.
         """
-        element = Vh.element().signature().split('(')[0]
-        if element == 'VectorElement':
+        element = Vh.element().signature().split("(")[0]
+        if element == "VectorElement":
             self.Uh = Vh
             self.uh_index = None
             return
-        elif element == 'MixedElement':
+        elif element == "MixedElement":
             for i in range(Vh.num_sub_spaces()):
-                if Vh.sub(i).element().signature().split('(')[0] == 'VectorElement':
+                if Vh.sub(i).element().signature().split("(")[0] == "VectorElement":
                     self.Uh = Vh.sub(i)
                     self.uh_index = i
                     return
@@ -240,42 +242,104 @@ class NormalDirichletBC(object):
                         continue
                     break
 
-    def _compute_normal(self, ds):
-        """Compute normal vector of the boundary nodes.
+    def _compute_normal(self, boundary_markers, mark, ref_point):
+        """Compute normal vectors of the boundary nodes.
 
         `self.normal` is outward, but not the unit vector.
+        Only 2D case is considered.
 
-        Parameters
-        ----------
-        ds: the measure of the boundary for which the normal is computed.
-
+        self:
+        boundary_markers:
+            Mesh function handling boundary mesh entities.
+        mark:
+            Index of boundary to compute the normal vector.
+        ref_point:
+            A point inside the mesh to use to check the direction of the normal
+            vector.
         """
-        n = dl.FacetNormal(self.Vh.mesh())
-        u = dl.TrialFunction(self.Vh)
-        v = dl.TestFunction(self.Vh)
+        self.normal = dl.Function(self.Vh)
+        idx_shared = np.zeros(self.Vh.dim())
 
         if self.uh_index is not None:
-            u = dl.split(u)[self.uh_index]
-            v = dl.split(v)[self.uh_index]
+            dofmap = [
+                self.Vh.sub(self.uh_index).sub(0).dofmap(),
+                self.Vh.sub(self.uh_index).sub(1).dofmap(),
+            ]
+        else:
+            dofmap = [self.Vh.sub(0).dofmap(), self.Vh.sub(1).dofmap()]
 
-        a = dl.inner(u, v) * ds
-        b = dl.inner(n, v) * ds
-        A = dl.assemble(a, keep_diagonal=True)
-        B = dl.assemble(b)
+        vert_coord = self.Vh.mesh().coordinates()
+        boundary_it = dl.SubsetIterator(boundary_markers, mark)
+        for e in boundary_it:
+            assert e.entities(0).size == 2, "Mesh entity should be line."
 
-        Apetsc = dl.as_backend_type(A).mat()
+            coord_pts = vert_coord[e.entities(0)[:]]
+            orient_mat = ref_point
+            orient_mat = np.vstack((orient_mat, coord_pts))
+            orient_mat = np.concatenate((orient_mat, np.array([[1, 1, 1]]).T), axis=1)
 
-        temp = np.ones(self.Vh.dim(), dtype=np.int)
-        for i in range(self.Uh.num_sub_spaces()):
-            temp[self.bc_dofs[i]] = 0
+            vec = coord_pts[1, :] - coord_pts[0, :]
+            normal = np.array([vec[1], -vec[0]])
+            normal = np.sign(np.linalg.det(orient_mat)) * normal
 
-        idx = np.where(temp == 1)[0]
-        Apetsc.zeroRowsColumns(list(idx), diag=1)
-        A = dl.Matrix(dl.PETScMatrix(Apetsc))
-        B[idx] = 0
+            # print(vec)
+            # print(normal)
+            # print("======")
 
-        self.normal = dl.Function(self.Vh)
-        dl.solve(A, self.normal.vector(), B)
+            for v in dl.vertices(e):
+                vid = v.global_index()
+
+                for i in range(2):
+                    dof = dofmap[i].entity_dofs(self.Vh.mesh(), 0, [vid])
+                    self.normal.vector()[dof] = (
+                        self.normal.vector()[dof] * idx_shared[dof] + normal[i]
+                    )
+                    idx_shared[dof] += 1
+                    self.normal.vector()[dof] /= idx_shared[dof]
+
+            eid = e.global_index()
+            if eid >= 0:
+                for i in range(2):
+                    dof = dofmap[i].entity_dofs(self.Vh.mesh(), 1, [eid])
+                    self.normal.vector()[dof] = normal[i]
+
+    # This function produces a normal vector which seems to be weird.
+    # def _compute_normal(self, ds):
+    #     """Compute normal vectors of the boundary nodes.
+    #
+    #     `self.normal` is outward, but not the unit vectorself.
+    #
+    #     Parameters
+    #     ----------
+    #     ds: the measure of the boundary for which the normal is computed.
+    #
+    #     """
+    #     n = dl.FacetNormal(self.Vh.mesh())
+    #     u = dl.TrialFunction(self.Vh)
+    #     v = dl.TestFunction(self.Vh)
+    #
+    #     if self.uh_index is not None:
+    #         u = dl.split(u)[self.uh_index]
+    #         v = dl.split(v)[self.uh_index]
+    #
+    #     a = dl.inner(u, v) * ds
+    #     b = dl.inner(n, v) * ds
+    #     A = dl.assemble(a, keep_diagonal=True)
+    #     B = dl.assemble(b)
+    #
+    #     Apetsc = dl.as_backend_type(A).mat()
+    #
+    #     temp = np.ones(self.Vh.dim(), dtype=np.int)
+    #     for i in range(self.Uh.num_sub_spaces()):
+    #         temp[self.bc_dofs[i]] = 0
+    #
+    #     idx = np.where(temp == 1)[0]
+    #     Apetsc.zeroRowsColumns(list(idx), diag=1)
+    #     A = dl.Matrix(dl.PETScMatrix(Apetsc))
+    #     B[idx] = 0
+    #
+    #     self.normal = dl.Function(self.Vh)
+    #     dl.solve(A, self.normal.vector(), B)
 
     def _construct_rotation(self):
         # WARNING: Only 2D case is implemented.
@@ -312,4 +376,3 @@ class NormalDirichletBC(object):
             self.Rpetsc[dofy, dofy] = nx
 
         self.Rpetsc.assemble()
-
