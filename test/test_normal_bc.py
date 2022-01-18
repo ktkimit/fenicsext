@@ -35,7 +35,7 @@ class UnitCircleProblem(object):
                 return on_boundary and x[1] < dl.DOLFIN_EPS
 
         nsteps = 11
-        p = 1
+        p = 2
 
         mesh = dl.UnitDiscMesh.create(dl.MPI.comm_world, nsteps, 2, 2)
         bottom = BottomBoundary()
@@ -43,7 +43,7 @@ class UnitCircleProblem(object):
         boundary_markers.set_all(0)
         bottom.mark(boundary_markers, 1)
 
-        UV = dl.VectorElement("Lagrange", mesh.ufl_cell(), 1)
+        UV = dl.VectorElement("Lagrange", mesh.ufl_cell(), p)
         Vh = dl.FunctionSpace(mesh, UV)
 
         self.normbc = NormalDirichletBC(Vh, dl.Constant(0.0), boundary_markers, 1)
