@@ -292,11 +292,30 @@ class NormalDirichletBC(object):
                     idx_shared[dof] += 1
                     self.normal.vector()[dof] /= idx_shared[dof]
 
+            # eid = e.global_index()
+            # if eid >= 0:
+            #     for i in range(2):
+            #         dof = dofmap[i].entity_dofs(self.Vh.mesh(), 1, [eid])
+            #         self.normal.vector()[dof] = normal[i]
+
+        boundary_it = dl.SubsetIterator(boundary_markers, mark)
+        for e in boundary_it:
+            assert e.entities(0).size == 2, "Mesh entity should be line."
+
+            normal = np.zeros(2)
             eid = e.global_index()
             if eid >= 0:
+                for v in dl.vertices(e):
+                    vid = v.global_index()
+
+                    for i in range(2):
+                        dof = dofmap[i].entity_dofs(self.Vh.mesh(), 0, [vid])
+                        normal[i] += self.normal.vector()[dof]
+
                 for i in range(2):
                     dof = dofmap[i].entity_dofs(self.Vh.mesh(), 1, [eid])
                     self.normal.vector()[dof] = normal[i]
+
 
     # This function produces a normal vector which seems to be weird.
     # def _compute_normal(self, ds):
