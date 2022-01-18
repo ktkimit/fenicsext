@@ -281,11 +281,6 @@ class NormalDirichletBC(object):
             vec = coord_pts[1, :] - coord_pts[0, :]
             normal = np.array([vec[1], -vec[0]])
             normal = np.sign(np.linalg.det(orient_mat)) * normal
-
-            # print(vec)
-            # print(normal)
-            # print("======")
-
             for v in dl.vertices(e):
                 vid = v.global_index()
 
