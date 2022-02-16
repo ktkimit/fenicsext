@@ -1,6 +1,7 @@
 import numpy as np
 import dolfin as dl
 from petsc4py import PETSc
+from scipy.sparse import csr_matrix
 
 
 class NormalDirichletBC(object):
@@ -281,6 +282,7 @@ class NormalDirichletBC(object):
             vec = coord_pts[1, :] - coord_pts[0, :]
             normal = np.array([vec[1], -vec[0]])
             normal = np.sign(np.linalg.det(orient_mat)) * normal
+            normal /= np.linalg.norm(normal)
             for v in dl.vertices(e):
                 vid = v.global_index()
 
@@ -317,7 +319,6 @@ class NormalDirichletBC(object):
                     self.normal.vector()[dof] = normal[i]
 
 
-    # This function produces a normal vector which seems to be weird.
     # def _compute_normal(self, ds):
     #     """Compute normal vectors of the boundary nodes.
     #
@@ -390,3 +391,6 @@ class NormalDirichletBC(object):
             self.Rpetsc[dofy, dofy] = nx
 
         self.Rpetsc.assemble()
+
+        RR = csr_matrix(self.Rpetsc.getValuesCSR()[::-1], self.Rpetsc.size)
+        self.RT = RR.transpose()
